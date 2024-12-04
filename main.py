@@ -1,6 +1,7 @@
 from config import AgentConfig
 from agent import Agent
 from api_client import HuggingFaceAPI
+import os
 
 def decompose_tasks(paragraph: str, llm_client: HuggingFaceAPI) -> list:
     """
@@ -40,7 +41,7 @@ def main():
     # Initialize the agent configuration
     config = AgentConfig(
         role="Python Task Agent",
-        api_token="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"  # Replace with your Hugging Face API token
+        api_token=os.getenv("HUGGINGFACE_API_KEY") # see example.env
     )
     # Initialize the Hugging Face client for LLM calls
     llm_client = HuggingFaceAPI(config)
