@@ -2,7 +2,7 @@
 
 ## Overview
 
-Welcome to the **TinyAgi-** repository! This project is built to help you learn and explore the capabilities of agentic frameworks. It provides a hands-on approach to understanding how these systems operate, enabling you to build tools and experiment with novel research methodologies in artificial intelligence.
+Welcome to the **TinyAgi-** repository! This project is an attempt to build and explore the capabilities of Agentic Systems and LLMs by making various tools, applying recent research.
 
 ## Learning Objectives
 
@@ -16,7 +16,7 @@ The project consists of several key components:
 
 - **main.py**: The main entry point for the application, where tasks are decomposed and processed using a Hugging Face API client. Update this file with your own tasks to run the application on your specific needs.
 - **agent.py**: Contains the `Agent` class, which defines the behavior of the AI agent, including how it processes tasks and generates executable Python code.
-- **editor/**: A folder containing tools like the video editing tool, which can be customized and extended for various multimedia tasks.
+- **toolbox/**: A folder containing all the tools that agent can be used for.
 
 ## Getting Started
 
