@@ -1,4 +1,4 @@
-# tinyAgi
+# tinyAGI
 
 ## Overview
 
