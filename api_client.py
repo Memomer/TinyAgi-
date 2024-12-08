@@ -1,33 +1,38 @@
-import requests
+from groq import Groq
 import logging
 
-class HuggingFaceAPI:
+class GroqAPI:
     def __init__(self, config):
-        self.api_url = f"https://api-inference.huggingface.co/models/{config.model_id}"
-        self.headers = {
-            "Authorization": f"Bearer {config.api_token}",
-            "Content-Type": "application/json"
-        }
-        self.max_tokens = config.max_tokens
+        """
+        Initializes the Groq API client with the given configuration.
+        :param config: Configuration object containing API key, model ID, etc.
+        """
+        self.client = Groq(api_key=config.api_token)  # Initialize Groq client
+        self.model_id = config.model_id
         self.temperature = config.temperature
 
     def generate_response(self, prompt: str) -> str:
-        payload = {
-            "inputs": prompt,
-            "parameters": {
-                "max_new_tokens": self.max_tokens,
-                "temperature": self.temperature,
-                "return_full_text": False
-            }
-        }
-
+        """
+        Sends a prompt to the Groq API and retrieves the generated response.
+        :param prompt: The input prompt to send to the model.
+        :return: The generated text response.
+        """
         try:
-            response = requests.post(self.api_url, headers=self.headers, json=payload)
-            response.raise_for_status()
-            
-            code = response.json()[0]['generated_text']
+            # Call the Groq API
+            logging.info("Sending request to Groq API...")
+            response = self.client.chat.completions.create(
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                model=self.model_id,
+                temperature=self.temperature,
+            )
+
+            # Extract the generated content
+            code = response.choices[0].message.content
+            logging.info("Response received successfully from Groq API.")
             return code.replace('```python', '').replace('```', '')
-            
+
         except Exception as e:
-            logging.error(f"API call failed: {str(e)}")
+            logging.error(f"Groq API call failed: {str(e)}")
             raise

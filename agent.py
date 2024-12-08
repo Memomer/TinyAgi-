@@ -1,7 +1,10 @@
 import logging
-from tools import BaseTool, Calculator, NoteTaker
+import importlib
+import os
+import sys
+from toolbox.tools import BaseTool
 from config import AgentConfig
-from api_client import HuggingFaceAPI
+from api_client import GroqAPI  # Updated to GroqAPI
 
 
 # Base Agent
@@ -13,29 +16,32 @@ class BaseAgent:
         self.config = config
         self.tools = {}
         self.state = {}
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(levelname)s - %(message)s",
+        )
+        self.logger = logging.getLogger(self.__class__.__name__)
 
     def register_tool(self, tool: BaseTool):
         """
         Registers a tool for the agent.
         """
         self.tools[tool.name()] = tool
-        logging.info(f"Tool '{tool.name()}' registered successfully.")
+        self.logger.info(f"Tool '{tool.name()}' registered successfully.")
 
 
 # Main Agent
 class Agent(BaseAgent):
     def __init__(self, config: AgentConfig):
         super().__init__(config)
-        self.api_client = HuggingFaceAPI(config)
+        self.api_client = GroqAPI(config)  # Updated to use GroqAPI
 
-        # Initialize and register tools
-        self.register_tool(Calculator())
-        self.register_tool(NoteTaker(self.state))
+        # Automatically register tools from the toolbox directory
+        self.auto_register_tools()
 
         # Build system prompt
         tool_descriptions = "\n".join(
-            f"- {tool.name()}: {tool.description()}"
-            for tool in self.tools.values()
+            f"- {tool.name()}: {tool.description()}" for tool in self.tools.values()
         )
         self.system_prompt = f"""You are {config.role}.
 Available tools:
@@ -45,92 +51,49 @@ RULES:
 1. Output ONLY executable Python code.
 2. Your answer MUST start with 'Answer:' and end with '###'.
 3. NO explanations or comments.
-4. NO markdown formatting.
-5. Use ONLY these patterns:
-   - result = calculate("expression")
-   - save_note("label", value)
-   - save_note("content")"""
+4. Use the registered tools dynamically."""
 
-    def run(self, user_input: str) -> str:
+    def auto_register_tools(self):
         """
-        Executes a task by generating Python code, validating it, and executing it.
+        Automatically registers all tools from the toolbox directory.
         """
-        try:
-            # Generate the prompt
-            prompt = f"""<s>[INST] {self.system_prompt}
+        sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
-Task: {user_input}
-Generate Python code to solve this task using the available tools. [/INST]"""
+        toolbox_dir = os.path.join(os.path.dirname(__file__), "toolbox")
+        for root, _, files in os.walk(toolbox_dir):
+            for file in files:
+                if file.endswith(".py") and file != "__init__.py":
+                    module_path = os.path.relpath(os.path.join(root, file), start=os.path.dirname(__file__))
+                    module_name = module_path.replace(os.sep, ".").rsplit(".", 1)[0]
+                    try:
+                        self.logger.info(f"Attempting to load module: {module_name}")
+                        module = importlib.import_module(module_name)
+                        for attr in dir(module):
+                            obj = getattr(module, attr)
+                            if isinstance(obj, type) and issubclass(obj, BaseTool) and obj is not BaseTool:
+                                tool_instance = obj(self.state) if "state" in obj.__init__.__code__.co_varnames else obj()
+                                self.register_tool(tool_instance)
+                    except Exception as e:
+                        self.logger.error(f"Failed to load tool from module '{module_name}': {e}")
 
-            # Get raw output from the API
-            raw_output = self.api_client.generate_response(prompt)
-            logging.info(f"Generated raw output:\n{raw_output}")
-
-            # Extract and clean the generated code
-            code = self._extract_code(raw_output)
-            logging.info(f"Extracted and cleaned code:\n{code}")
-
-            # Validate the extracted code
-            self._validate_code(code)
-
-            # Execute the validated code
-            local_dict = {tool.name(): tool.execute for tool in self.tools.values()}
-            exec(code, {}, local_dict)
-
-            # Update the state with results
-            self._update_state()
-
-            return str(self.state)
-
-        except Exception as e:
-            logging.error(f"Agent execution failed: {str(e)}")
-            return f"Error during execution: {str(e)}"
-
-    def _extract_code(self, raw_output: str) -> str:
+    def run(self, task_description: str) -> str:
         """
-        Extracts the Python code between 'Answer:' and '###'.
+        Executes a task using a matching tool or default logic.
+        :param task_description: The description of the task to execute.
+        :return: The result of the task execution.
         """
         try:
-            start_marker = "Answer:"
-            end_marker = "###"
+            # Identify the relevant tool based on task content
+            for tool_name, tool in self.tools.items():
+                if tool_name in task_description.lower():
+                    self.logger.info(f"Using tool '{tool_name}' to execute task: {task_description}")
+                    result = tool.execute(task_description)
+                    self.state[f"last_{tool_name}_result"] = result
+                    return result
 
-            start_index = raw_output.find(start_marker)
-            end_index = raw_output.find(end_marker, start_index)
-
-            if start_index == -1 or end_index == -1:
-                raise ValueError("Code boundaries ('Answer:' and '###') not found in the output.")
-
-            # Extract and clean the code
-            code = raw_output[start_index + len(start_marker):end_index].strip()
-
-            if not code:
-                raise ValueError("Extracted code is empty or invalid.")
-
-            return code
+            # Default fallback
+            raise ValueError("No matching tool found for the task description.")
 
         except Exception as e:
-            logging.error(f"Code extraction failed: {str(e)}")
-            raise
-
-    def _validate_code(self, code: str):
-        """
-        Validates the extracted code to ensure it uses only allowed patterns and avoids unsafe operations.
-        """
-        allowed_patterns = ["calculate(", "save_note("]
-        prohibited_keywords = ["exec", "eval", "__", "import"]
-
-        # Ensure allowed patterns are used
-        if not any(pattern in code for pattern in allowed_patterns):
-            raise ValueError("Generated code does not use any of the allowed tools.")
-
-        # Check for prohibited keywords
-        if any(keyword in code for keyword in prohibited_keywords):
-            raise ValueError("Generated code contains prohibited or unsafe operations.")
-
-    def _update_state(self):
-        """
-        Updates the agent's state with the last result from each tool.
-        """
-        for name, tool in self.tools.items():
-            if hasattr(tool.execute, 'last_result'):
-                self.state[f'last_{name}_result'] = tool.execute.last_result
+            self.logger.error(f"Failed to execute task: {e}")
+            return f"Error during execution: {e}"
